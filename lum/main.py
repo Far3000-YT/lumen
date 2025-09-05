@@ -45,7 +45,12 @@ def lum_command_local(args):
     check_config()
     base_parameters = get_parameters()
 
+    config_data = get_config_data()
+    use_ai_instructions = config_data.get("use_ai_instructions", False)
+    ai_instructions_text = config_data.get("ai_instructions_text", "")
     intro_text = base_parameters["intro_text"]
+    if use_ai_instructions and ai_instructions_text:
+        intro_text += "\n\nPlease read and remember the special instructions in `ai-instructions.txt` before proceeding."
 
     if gitignore_exists(""): skipped_files, _ = gitignore_skipping()
     else: skipped_files = get_files_parameters()["non_allowed_read"]
@@ -61,8 +66,32 @@ def lum_command_local(args):
 
     structure = ""
     structure = add_intro(structure, intro_text)
-    structure = add_structure(structure, make_structure(root_path, skipped_folders))
+
+    json_structure_str = make_structure(root_path, skipped_folders)
+    if use_ai_instructions and ai_instructions_text:
+        try:
+            json_structure = json.loads(json_structure_str)
+            root_key = next(iter(json_structure))
+            json_structure[root_key]["ai-instructions.txt"] = {}
+            json_structure_str = json.dumps(json_structure, indent=4)
+        except (json.JSONDecodeError, StopIteration):
+            pass 
+    
+    structure = add_structure(structure, json_structure_str)
+
+    if use_ai_instructions and ai_instructions_text:
+        structure += title_text.format(file="ai-instructions.txt") + PROMPT_SEPERATOR
+        structure += ai_instructions_text + PROMPT_SEPERATOR
+
     structure = add_files_content(structure, files_root, title_text = title_text, allowed_files = allowed_files, skipped_files = skipped_files)
+    
+    try:
+        import tiktoken
+        encoding = tiktoken.get_encoding("cl100k_base")
+        token_count = len(encoding.encode(structure))
+        print(f"Estimated prompt token count: {Fore.CYAN}{token_count}")
+    except Exception:
+        print(f"{Fore.YELLOW}Could not calculate token count.")
 
     if output_file is None:
         try:
@@ -174,7 +203,15 @@ def lum_contribute(args):
     print(" 2. Sanitizing code and preparing payload...")
     codebase = assemble_for_api(files_root, allowed_files, skipped_files)
     
-    print(" 3. Submitting to Lumen network...")
+    try:
+        import tiktoken
+        encoding = tiktoken.get_encoding("cl100k_base")
+        token_count = len(encoding.encode(codebase))
+        print(f" 3. Estimated payload token count: {Fore.CYAN}{token_count}")
+    except Exception:
+        print(f"{Fore.YELLOW}Could not calculate token count for payload.")
+
+    print(" 4. Submitting to Lumen network...")
     response = api.submit_contribution(pat, codebase)
     
     if response:
@@ -277,7 +314,7 @@ def main():
     check_config()
 
     if args.command == 'version':
-        print("pylumen, version 1.0.1")
+        print("pylumen, version v2.0.0")
 
     elif args.command == 'login':
         lum_login(args)
